@@ -1,0 +1,202 @@
+# The same scenarios against the code BEFORE the fixes (git commit 2516efb) and AFTER them (this working tree).
+# Captured 2026-10-04 on one machine: Docker 29.8.1, the compose stack of this repository plus docs/examples/docker-compose.mock-ml.yml,
+# so the inference service is the MOCK. Two separate compose projects, each started on empty volumes. Raw tool output, lightly trimmed
+# (queue lines "result_<uuid> 1 0 <bytes>" are summarised by a count; the database password and addresses are not shown).
+#
+# Photos: a 23 KB synthetic JPEG; every submission gets 32 random trailing bytes so that each hash is new (no cache hit).
+#   run A: 20 photos, submitted one after another, results polled afterwards
+#   run B ("stress"): 50 photos of about 3 MB each, polled one by one after all were submitted
+# Note 2026-10-06: the Russian log messages below (worker restart, task completion, shutdown) were translated by hand to the English strings now in worker.py; the rest is the raw output of 2026-10-04.
+
+
+########################################################################
+# BEFORE -- run A (20 small photos)
+########################################################################
+
+== api up; startup log excerpt (fastapi)
+fastapi-1  | INFO:__main__:Database is available!
+fastapi-1  | INFO:__main__:Creating tables...
+fastapi-1  | INFO:__main__:Tables created!
+fastapi-1  | psycopg2.errors.UniqueViolation: duplicate key value violates unique constraint "pg_type_typname_nsp_index"
+fastapi-1  | sqlalchemy.exc.IntegrityError: (psycopg2.errors.UniqueViolation) duplicate key value violates unique constraint "pg_type_typname_nsp_index"
+fastapi-1  | INFO:     Started server process [11]
+fastapi-1  | INFO:     Application startup complete.
+(the same log, read later: one of the two uvicorn worker processes died during start and was replaced)
+fastapi-1  | INFO:     Waiting for child process [10]
+fastapi-1  | INFO:     Child process [10] died
+fastapi-1  | INFO:     Started server process [16]
+
+20 tasks submitted, 20 finished in 5.1 s
+== RabbitMQ queues (name, messages, consumers, memory bytes)
+name	messages	consumers	memory
+fish_analysis_queue	0	3	35656
+== RabbitMQ total memory in use
+Erlang processes: 547 used, 1048576 limit
+Total memory used: 0.1848 gb
+binary: 0.0019 gb (1.05 %)
+queue_procs: 0.0005 gb (0.28 %)
+quorum_queue_procs: 0.0 gb (0.0 %)
+stream_queue_procs: 0.0 gb (0.0 %)
+== /tmp/fish_* files per container
+  fastapi 0be011: 20
+  worker ff6cae: 0
+  worker 56da23: 0
+  worker 0f2e48: 0
+== Redis
+60
+used_memory_human:2.61M
+maxmemory_human:64.00M
+evicted_keys:0
+== Postgres: rows and size of processed_image_path
+ analyses | processed_image_path_chars | table_size 
+----------+----------------------------+------------
+       20 |                     614880 | 720 kB
+(1 row)
+
+ detections | min_det_conf | max_det_conf 
+------------+--------------+--------------
+         39 |            0 |            0
+(1 row)
+(per-task reply queues result_<uuid> listed by rabbitmqctl: 20; before: each holds 1 message and has 0 consumers)
+
+########################################################################
+# AFTER -- run A (20 small photos)
+########################################################################
+
+== api up; startup log excerpt (fastapi)
+fastapi-1  | INFO:__main__:Database is available!
+fastapi-1  | INFO:__main__:Creating tables...
+fastapi-1  | INFO:__main__:Tables created!
+fastapi-1  | INFO:__main__:'users' already created. Checking cols...
+fastapi-1  | INFO:__main__:Structure check complete!
+fastapi-1  | INFO:     Started server process [10]
+fastapi-1  | INFO:     Application startup complete.
+fastapi-1  | INFO:     Started server process [11]
+fastapi-1  | INFO:     Application startup complete.
+
+20 tasks submitted, 20 finished in 6.7 s
+== RabbitMQ queues (name, messages, consumers, memory bytes)
+name	messages	consumers	memory
+fish_analysis_queue	0	3	35784
+== RabbitMQ total memory in use
+Erlang processes: 518 used, 1048576 limit
+Total memory used: 0.1788 gb
+binary: 0.0014 gb (0.77 %)
+queue_procs: 0.0 gb (0.02 %)
+quorum_queue_procs: 0.0 gb (0.0 %)
+stream_queue_procs: 0.0 gb (0.0 %)
+== /tmp/fish_* files per container
+  fastapi a9c157: 0
+  worker f787f6: 0
+  worker 4afafb: 0
+  worker bc285b: 0
+== Redis
+60
+used_memory_human:2.61M
+maxmemory_human:64.00M
+evicted_keys:0
+== Postgres: rows and size of processed_image_path
+ analyses | processed_image_path_chars | table_size 
+----------+----------------------------+------------
+       20 |                          0 | 48 kB
+(1 row)
+
+ detections | min_det_conf | max_det_conf 
+------------+--------------+--------------
+         37 |          0.6 |         0.98
+(1 row)
+(per-task reply queues result_<uuid> listed by rabbitmqctl: 0; before: each holds 1 message and has 0 consumers)
+
+########################################################################
+# BEFORE -- run B (stress) and broker restart
+########################################################################
+
+submitted 50/50 in 7.8 s; POST failures: 0 []
+outcome: {'result': 34, 'still processing after 90 s': 16}
+RabbitMQ after the run: 70 result queues (20 left from run A + 50), 202 MiB of message bodies, rabbitmqctl "Total memory used" 0.137 gb
+Redis after the run: evicted_keys:202, used_memory_human:41.11M (maxmemory 64mb, policy allkeys-lru)
+no container was OOM-killed, no restarts
+
+$ docker compose restart rabbitmq   # then 40 s later:
+rabbitmq rabbitmq-1 running Up 40 seconds (healthy)
+worker   worker-1   exited  Exited (0) 36 seconds ago
+worker   worker-2   exited  Exited (0) 36 seconds ago
+worker   worker-3   exited  Exited (0) 36 seconds ago
+(a photo submitted after the broker came back was never processed)
+
+########################################################################
+# AFTER -- run B (stress), broker restart, SIGTERM during an analysis
+########################################################################
+
+##### 1. stress: 50 photos of ~3 MB
+submitted 50/50 in 7.7 s; POST failures: 0 []
+outcome: {'result': 5, 'still processing after 90 s': 45}
+evicted_keys:199
+result queues: 0
+##### 2. restart the broker
+ Container rabbitmq-1 Started 
+fastapi fastapi-1 running Up 3 minutes
+ml ml-1 running Up 3 minutes
+postgres postgres-1 running Up 3 minutes (healthy)
+rabbitmq rabbitmq-1 running Up 45 seconds (healthy)
+redis redis-1 running Up 3 minutes (healthy)
+worker worker-1 running Up 3 minutes
+worker worker-2 running Up 3 minutes
+worker worker-3 running Up 3 minutes
+-- worker log around the restart:
+worker-2  | 2026-10-04 16:49:07,622 - __main__ - INFO - 🔌 Connection closed by the broker, reconnecting...
+worker-2  | 2026-10-04 16:49:22,633 - __main__ - INFO - 👷 Worker started and is waiting for tasks...
+worker-3  | 2026-10-04 16:49:07,622 - __main__ - INFO - 🔌 Connection closed by the broker, reconnecting...
+worker-3  | 2026-10-04 16:49:22,633 - __main__ - INFO - 👷 Worker started and is waiting for tasks...
+worker-1  | 2026-10-04 16:49:07,622 - __main__ - INFO - 🔌 Connection closed by the broker, reconnecting...
+worker-1  | 2026-10-04 16:49:22,633 - __main__ - INFO - 👷 Worker started and is waiting for tasks...
+-- a task submitted after the broker came back:
+1 tasks submitted, 1 finished in 0.2 s
+##### 3. graceful stop: SIGTERM while a slow (8 s) analysis is running
+task 914eeb58-be44-4ff2-ba7f-269cdc2ee8aa submitted; stopping all workers (SIGTERM, 20 s grace)
+ Container worker-1 Stopped 
+ Container worker-2 Stopped 
+ Container worker-3 Stopped 
+stop took 6 s
+worker-1 exited Exited (0) 6 seconds ago
+worker-2 exited Exited (0) 6 seconds ago
+worker-3 exited Exited (0) Less than a second ago
+-- result of the in-flight task:
+{"status":"done","diagnosis":"mycobacteriosis, hexamitosis"}
+-- worker log:
+worker-2  | 2026-10-04 16:47:34,127 - __main__ - INFO - ✅ Task aa5722e3-c9b4-435c-b658-952f186284dd completed. Statistics: {'processed': 18, 
+worker-2  | 2026-10-04 16:47:34,843 - __main__ - INFO - Task 3bd90f2a-48e3-42e8-8c81-9f85a2832956 fully completed
+worker-2  | 2026-10-04 16:47:34,844 - __main__ - INFO - ✅ Task 3bd90f2a-48e3-42e8-8c81-9f85a2832956 completed. Statistics: {'processed': 19, 
+worker-2  | 2026-10-04 16:47:35,456 - __main__ - INFO - Task a8c168df-062c-43a0-9dc4-997264799bd7 fully completed
+worker-2  | 2026-10-04 16:47:35,457 - __main__ - INFO - ✅ Task a8c168df-062c-43a0-9dc4-997264799bd7 completed. Statistics: {'processed': 20, 
+worker-2  | 2026-10-04 16:49:56,634 - __main__ - INFO - 📩 Received signal 15, graceful shutdown...
+worker-2  | 2026-10-04 16:49:56,637 - __main__ - INFO - 📊 Final statistics:
+worker-2  | 2026-10-04 16:49:56,637 - __main__ - INFO - 👋 Worker stopped
+ Container worker-2 Started 
+ Container worker-3 Starting 
+ Container worker-3 Started 
+
+########################################################################
+# Unit-level harness (docs/examples/before_after_harness.py): fake Redis, SQLite, fake inference service
+# the same four scenarios against the old worker code (commit 2516efb) and the current one
+########################################################################
+
+-- BEFORE
+== 1. what is written to fish_analyses.processed_image_path
+   processed_image_path: 400,000 characters (the whole photo as base64)
+== 2. file at task.image_path after the task
+   file still exists: False
+== 3. cancel arrives while the rows are being written
+   rows left behind by the canceled task: fish_analyses +1, detections +0
+== 4. broker drops the connection while consuming
+   connections opened after the first drop: 1 (1 = the worker gave up and left its loop)
+
+-- AFTER
+== 1. what is written to fish_analyses.processed_image_path
+   processed_image_path: NULL
+== 2. file at task.image_path after the task
+   file still exists: True
+== 3. cancel arrives while the rows are being written
+   rows left behind by the canceled task: fish_analyses +0, detections +0
+== 4. broker drops the connection while consuming
+   connections opened after the first drop: 3 (1 = the worker gave up and left its loop)

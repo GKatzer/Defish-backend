@@ -1,0 +1,15 @@
+# Adds the mock inference service to the stack, so it runs without model weights:
+#   echo "ML_SERVER_URL=http://ml:8000" in .env, then
+#   docker compose -f docker-compose.yml -f docs/examples/docker-compose.mock-ml.yml up -d --build
+# The service reuses the API image (it has fastapi and uvicorn; Pillow is absent, so the mock reports 640x480).
+services:
+  ml:
+    build: .
+    command: python docs/examples/mock_ml_server.py
+    environment:
+      - MOCK_HOST=0.0.0.0
+      - MOCK_PORT=8000
+      - MOCK_USE_LAYOUT=${MOCK_USE_LAYOUT:-0}   # 1: boxes on the fish of the sample picture
+      - MOCK_DELAY_SECONDS=${MOCK_DELAY_SECONDS:-8}   # how long a file name containing "slow" takes
+    networks:
+      - shared-network

@@ -1,0 +1,16 @@
+version: 1
+formatters:
+  default:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+handlers:
+  file:
+    class: logging.FileHandler
+    filename: logs/fastapi.log
+    formatter: default
+loggers:
+  uvicorn:
+    handlers: [file]
+    level: INFO
+root:
+  handlers: [file]
+  level: INFO

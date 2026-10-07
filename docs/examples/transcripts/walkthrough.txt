@@ -1,0 +1,128 @@
+# Output of docs/examples/walkthrough.sh against the compose stack with the MOCK inference service.
+# Captured 2026-10-04 (Docker 29.8.1, this repository's working tree). Detections, classes and confidences come from
+# the mock, not from a model. The image field is shortened; task ids and database ids differ on every run.
+# Note 2026-10-06: the Russian texts of the original run (the care advice, the "no objects" diagnosis) were replaced by hand with the English strings now in the code (utils/recommendations.py, worker.py); the rest is the raw output of 2026-10-04.
+
+## demo reset: forget cached analyses
+
+$ curl -s http://127.0.0.1:8001/clear-cache
+{"status":"success","cleared":2}
+## 1. connectivity to the inference service
+
+$ curl -s http://127.0.0.1:8001/handshake
+{"response":"{\"status\":\"healthy\",\"service\":\"ml-inference\",\"version\":\"1.0.0\",\"detector\":\"loaded\",\"classifier\":\"loaded\",\"mock\":true}"}
+## 2. upload a new photo: the answer is a task id
+
+$ curl -s -F image=@aquarium-synthetic.jpg http://127.0.0.1:8001/analyze
+{"task_id":"857ef143-ed65-4a1d-aa2b-b469330cc91a","cached":false,"message":"Task submitted successfully","result":null}
+
+$ curl -s http://127.0.0.1:8001/analyze-result/857ef143-ed65-4a1d-aa2b-b469330cc91a | jq -c '.status // "done"'   # processing until a worker is done
+"done"
+
+$ curl -s http://127.0.0.1:8001/analyze-result/857ef143-ed65-4a1d-aa2b-b469330cc91a | jq 'if has("original_image") then .original_image |= (.[0:20] + "...") else . end'
+{
+  "id": "84",
+  "diagnosis": "mycobacteriosis, hexamitosis",
+  "confidence": 0.735,
+  "recommendations": "Mycobacteriosis (fish tuberculosis). A chronic disease that is hard to cure. Recommendations: isolate the sick fish; if the damage is severe, euthanise it to avoid infecting the others; thoroughly disinfect the aquarium and equipment. The pathogen is dangerous to humans: wear gloves.\n\nHexamitosis (\"hole-in-the-head\" disease). Recommendations: metronidazole-based medication, better water quality and diet (vitamin-enriched food), quarantine of the sick fish.",
+  "original_image": "/9j/4AAQSkZJRgABAQAA...",
+  "image_format": "jpeg",
+  "image_width": 640,
+  "image_height": 480,
+  "detections": [
+    {
+      "x_min": 253,
+      "y_min": 55,
+      "x_max": 417,
+      "y_max": 128,
+      "detection_class": "0",
+      "detection_confidence": 0.62,
+      "classification_class": "mycobacteriosis",
+      "classification_confidence": 0.58,
+      "recommendations": "Mycobacteriosis (fish tuberculosis). A chronic disease that is hard to cure. Recommendations: isolate the sick fish; if the damage is severe, euthanise it to avoid infecting the others; thoroughly disinfect the aquarium and equipment. The pathogen is dangerous to humans: wear gloves.",
+      "uncertain": true,
+      "top3": [
+        {
+          "label": "mycobacteriosis",
+          "confidence": 0.58
+        },
+        {
+          "label": "oodiniosis",
+          "confidence": 0.29
+        },
+        {
+          "label": "healthy",
+          "confidence": 0.13
+        }
+      ]
+    },
+    {
+      "x_min": 179,
+      "y_min": 29,
+      "x_max": 338,
+      "y_max": 91,
+      "detection_class": "0",
+      "detection_confidence": 0.86,
+      "classification_class": "hexamitosis",
+      "classification_confidence": 0.89,
+      "recommendations": "Hexamitosis (\"hole-in-the-head\" disease). Recommendations: metronidazole-based medication, better water quality and diet (vitamin-enriched food), quarantine of the sick fish.",
+      "uncertain": false,
+      "top3": [
+        {
+          "label": "hexamitosis",
+          "confidence": 0.89
+        },
+        {
+          "label": "mycobacteriosis",
+          "confidence": 0.08
+        },
+        {
+          "label": "plistophorosis",
+          "confidence": 0.03
+        }
+      ]
+    }
+  ]
+}
+
+## 3. the same photo again: answered from the Redis cache (keyed by the image bytes), no task
+
+$ curl -s -F image=@aquarium-synthetic.jpg http://127.0.0.1:8001/analyze | jq -c '{id, diagnosis, confidence, detections: (.detections | length), task_id}'
+{"id":"85","diagnosis":"mycobacteriosis, hexamitosis","confidence":0.735,"detections":2,"task_id":null}
+
+## 4. no fish found (mock switch: file name contains 'empty')
+
+$ curl -s http://127.0.0.1:8001/analyze-result/6f373375-0ec7-412f-8efe-043141a113ad | jq 'if has("original_image") then .original_image |= (.[0:20] + "...") else . end'
+{
+  "id": "86",
+  "diagnosis": "No objects detected",
+  "confidence": 0.0,
+  "recommendations": "No fish was found in the photo. Take a sharper picture in good light so that the whole fish is visible.",
+  "original_image": "/9j/4AAQSkZJRgABAQAA...",
+  "image_format": "jpeg",
+  "image_width": 640,
+  "image_height": 480,
+  "detections": []
+}
+
+## 5. the inference service fails (mock switch: 'broken')
+
+$ curl -s http://127.0.0.1:8001/analyze-result/a9d31efd-8f20-48ed-b2c4-824c722b2710
+{"status":"failed","message":"ML service returned HTTP 500","task_id":"a9d31efd-8f20-48ed-b2c4-824c722b2710"}
+## 6. cancel a slow analysis (mock switch: 'slow', 8 s)
+
+$ curl -s -X POST http://127.0.0.1:8001/cancel/e8eafb5c-0857-438d-b773-1960c134440a
+{"status":"canceled"}
+$ curl -s http://127.0.0.1:8001/analyze-result/e8eafb5c-0857-438d-b773-1960c134440a
+{"status":"canceled","message":"Analysis canceled by user","task_id":"e8eafb5c-0857-438d-b773-1960c134440a"}
+## 7. a task id nobody issued
+
+$ curl -s http://127.0.0.1:8001/analyze-result/00000000-0000-0000-0000-000000000000
+{"status":"processing","message":"Image analysis is still in progress","task_id":"00000000-0000-0000-0000-000000000000"}
+## 8. cache statistics and interactive docs
+
+$ curl -s http://127.0.0.1:8001/cache-stats | jq -c 'del(.example_cached_items[].key)'
+{"status":"connected","total_cached_images":2,"memory_used":"26.68M","example_cached_items":[{"diagnosis":"mycobacteriosis, hexamitosis","cached_at":"2026-10-04T16:55:14.419218"},{"diagnosis":"No objects detected","cached_at":"2026-10-04T16:55:14.472499"}]}
+
+$ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8001/docs
+200

@@ -1,0 +1,28 @@
+# Error cases and edge behaviour of the API (mock inference service), 2026-10-04. 203.0.113.7 is a documentation address.
+
+$ curl -s -X POST $BASE/analyze            # no file
+{"detail":[{"type":"missing","loc":["body","image"],"msg":"Field required","input":null}]}   [HTTP 422]
+
+$ curl -s $BASE/analyze                    # wrong method
+{"detail":"Method Not Allowed"}   [HTTP 405]
+
+$ curl -s -F image=@note.txt $BASE/analyze  # a text file: the API does not check that it is an image
+{"task_id":"eb2d6bb3-7eb1-4228-96f6-63b32d95cbbe","cached":false,"message":"Task submitted successfully","result":null}   [HTTP 200]
+
+$ curl -s -i -X OPTIONS $BASE/analyze -H "Origin: https://example.org" -H "Access-Control-Request-Method: POST"   # CORS
+HTTP/1.1 200 OK
+access-control-allow-origin: *
+access-control-allow-methods: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT
+access-control-max-age: 600
+
+$ curl -s $BASE/openapi.json | jq -r ".paths | to_entries[] | \"\(.key) \(.value | keys | join(\",\"))\""
+/handshake get
+/analyze post
+/cancel/{task_id} post
+/analyze-result/{task_id} get
+/cache-stats get
+/clear-cache get
+/ get
+
+$ curl -s -F image=@big.bin $BASE/analyze     # an 11 MB file (MAX_UPLOAD_MB defaults to 10)   [captured in the stress run of 2026-10-04]
+{"detail":"Image is larger than 10 MB"}   [HTTP 413]

@@ -1,0 +1,26 @@
+# Copy to .env and replace every CHANGE_ME / <...> value. Format: KEY=value, no spaces around "=".
+# Read by docker compose (service environment and variable substitution) and by the application.
+
+# --- required ---
+# Base address of the inference service (Defish-inference): host:port or http://host:port, no path.
+ML_SERVER_URL=http://<ml-host>:<ml-port>
+
+# Database container (postgres image) and, unless DATABASE_URL_INT is set, the application's connection.
+# The password goes into a URL, so use URL-safe characters.
+POSTGRES_USER=fishuser
+POSTGRES_PASSWORD=CHANGE_ME
+POSTGRES_DB=fishguard
+
+# --- optional ---
+# Full connection URL for the application; overrides the one built from POSTGRES_* by docker-compose.yml.
+# DATABASE_URL_INT=postgresql://fishuser:CHANGE_ME@postgres:5432/fishguard
+
+# Lifetime of a cached analysis (same photo, same result), seconds. Default 3600.
+# CACHE_SAVING_TIME=3600
+
+# Largest accepted upload, MB; larger files get 413. Default 10.
+# MAX_UPLOAD_MB=10
+
+# RabbitMQ credentials; the broker container and the application read the same two variables. Default guest / guest.
+# RABBITMQ_USERNAME=fishguard
+# RABBITMQ_PASSWORD=CHANGE_ME

@@ -1,0 +1,139 @@
+# Large photos: delivery of results and survival of the stack, old code against current code. 2026-10-04.
+# Mock inference service, Docker 29.8.1, every stack started on empty volumes. Photos: the 23 KB synthetic picture plus 3 MB of random bytes
+# (a different hash each; the mock does not look at the content). 50 photos per run. Redis: 64 MB, allkeys-lru, unless stated.
+#
+#   crude     the client submits all 50 photos one after another and only then polls them one by one (worst case; 15 s to collect)
+#   realistic five waves of 10 concurrent clients; each submits one photo and polls it every second, as the web client does (15 s per client)
+#
+# "result" = delivered, "lost" = still "processing" when the client gave up (the result was evicted from Redis or never produced),
+# "submit errors" = the upload itself failed. oom=true is Docker's OOMKilled flag of the container (a process inside was killed
+# by the memory limit; RestartCount stayed 0, so the container's main process survived). Each line is one run; there are no intervals.
+
+######## FIRST SERIES (before the fixes: commit 2516efb; after: this working tree), copied from the console, three runs each on one stack
+BEFORE crude run1:     {"result": 40, "failed": 0, "lost": 10, "submit errors": 0} in 23 s | evicted_keys:122
+BEFORE crude run2:     {"result": 5,  "failed": 0, "lost": 44, "submit errors": 1} in 34 s | evicted_keys:0
+BEFORE crude run3:     {"result": 0,  "failed": 0, "lost": 50, "submit errors": 0} in 19 s | evicted_keys:0
+BEFORE realistic run1: {"result": 0,  "failed": 0, "lost": 50, "submit errors": 0} in 82 s | evicted_keys:0
+BEFORE realistic run2: {"result": 0,  "failed": 0, "lost": 48, "submit errors": 2} in 85 s | evicted_keys:0
+BEFORE realistic run3: {"result": 0,  "failed": 0, "lost": 43, "submit errors": 7} in 82 s | evicted_keys:0
+   end state of the old stack: fastapi, ml, postgres, rabbitmq, redis running; worker x3 exited
+AFTER crude run1:      {"result": 9,  "failed": 0, "lost": 41, "submit errors": 0} in 21 s | evicted_keys:140
+AFTER crude run2:      {"result": 6,  "failed": 0, "lost": 44, "submit errors": 0} in 23 s | evicted_keys:139
+AFTER crude run3:      {"result": 5,  "failed": 0, "lost": 45, "submit errors": 0} in 22 s | evicted_keys:138
+AFTER realistic run1:  {"result": 44, "failed": 0, "lost": 6,  "submit errors": 0} in 71 s | evicted_keys:133
+AFTER realistic run2:  {"result": 35, "failed": 0, "lost": 1,  "submit errors": 14} in 33 s | evicted_keys:96
+AFTER realistic run3:  {"result": 40, "failed": 0, "lost": 9,  "submit errors": 1} in 70 s | evicted_keys:134
+   end state of the current stack: all services running, worker x3 running
+
+######## SECOND SERIES (fresh stacks; container state read after every run)
+######## BEFORE (old code), 3 crude runs in a row on one stack
+BEFORE (old code), 3 crude runs in a row on one stack | crude: {"result": 10, "failed": 0, "lost (still processing)": 16, "submit errors": 24} in 31 s | evicted_keys:39
+   /fastapi-1 status=running oom=false restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.2577 gb, result queues: 26
+BEFORE (old code), 3 crude runs in a row on one stack | crude: {"result": 7, "failed": 0, "lost (still processing)": 43, "submit errors": 0} in 37 s | evicted_keys:99
+   /fastapi-1 status=running oom=false restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: , result queues: 0
+BEFORE (old code), 3 crude runs in a row on one stack | crude: {"result": 0, "failed": 0, "lost (still processing)": 50, "submit errors": 0} in 56 s | evicted_keys:0
+   /fastapi-1 status=running oom=false restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=1
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=exited oom=false restarts=0
+   /worker-2 status=exited oom=false restarts=0
+   /worker-3 status=exited oom=false restarts=0
+   rabbitmq: Total memory used: 0.145 gb, result queues: 50
+######## AFTER (current code, Redis 64 MB), realistic x2
+AFTER (current code, Redis 64 MB), realistic x2 | realistic: {"result": 50, "failed": 0, "lost (still processing)": 0, "submit errors": 0} in 38 s | evicted_keys:136
+   /fastapi-1 status=running oom=false restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.2771 gb, result queues: 0
+AFTER (current code, Redis 64 MB), realistic x2 | realistic: {"result": 41, "failed": 0, "lost (still processing)": 2, "submit errors": 7} in 65 s | evicted_keys:126
+   /fastapi-1 status=running oom=true restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.2001 gb, result queues: 0
+######## AFTER + Redis maxmemory 256 MB (container 384 MB): realistic x3, crude x1
+AFTER + Redis maxmemory 256 MB (container 384 MB): realistic x3, crude x1 | realistic: {"result": 8, "failed": 0, "lost (still processing)": 0, "submit errors": 42} in 21 s | evicted_keys:0
+   /fastapi-1 status=running oom=false restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.2691 gb, result queues: 0
+AFTER + Redis maxmemory 256 MB (container 384 MB): realistic x3, crude x1 | realistic: {"result": 37, "failed": 0, "lost (still processing)": 0, "submit errors": 13} in 46 s | evicted_keys:47
+   /fastapi-1 status=running oom=true restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.2275 gb, result queues: 0
+AFTER + Redis maxmemory 256 MB (container 384 MB): realistic x3, crude x1 | realistic: {"result": 50, "failed": 0, "lost (still processing)": 0, "submit errors": 0} in 42 s | evicted_keys:80
+   /fastapi-1 status=running oom=true restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.2562 gb, result queues: 0
+AFTER + Redis maxmemory 256 MB (container 384 MB): realistic x3, crude x1 | crude: {"result": 24, "failed": 0, "lost (still processing)": 26, "submit errors": 0} in 33 s | evicted_keys:80
+   /fastapi-1 status=running oom=true restarts=0
+   /ml-1 status=running oom=false restarts=0
+   /postgres-1 status=running oom=false restarts=0
+   /rabbitmq-1 status=running oom=false restarts=0
+   /redis-1 status=running oom=false restarts=0
+   /worker-1 status=running oom=false restarts=0
+   /worker-2 status=running oom=false restarts=0
+   /worker-3 status=running oom=false restarts=0
+   rabbitmq: Total memory used: 0.1643 gb, result queues: 0
+
+######## THIRD SERIES: current code with the photo in its own Redis key (photo:<md5>) and the 10 MB upload limit
+# API 200 MB, Redis 64 MB as before. Fresh stack, one run after another; container state read after each run.
+realistic: {"result": 32, "failed": 0, "lost": 0, "submit errors": 18} in 32 s | evicted_keys:92
+   fastapi oom=true restarts=0; rabbitmq oom=false restarts=0; worker x3 running
+realistic: {"result": 41, "failed": 0, "lost": 0, "submit errors": 9} in 22 s | evicted_keys:120
+   fastapi oom=true restarts=0; rabbitmq oom=false restarts=0; worker x3 running
+realistic: {"result": 50, "failed": 0, "lost": 0, "submit errors": 0} in 28 s | evicted_keys:157
+   fastapi oom=true restarts=0; rabbitmq oom=false restarts=0; worker x3 running
+crude: {"result": 12, "failed": 0, "lost": 38, "submit errors": 0} in 25 s | evicted_keys:153
+   fastapi oom=true restarts=0; rabbitmq oom=false restarts=0; worker x3 running
+crude: {"result": 10, "failed": 0, "lost": 40, "submit errors": 0} in 24 s | evicted_keys:161
+   fastapi oom=true restarts=0; rabbitmq oom=false restarts=0; worker x3 running
+-- sizes in Redis after the last run (bytes): one result, one cache entry, one photo
+result: 6113  fish: 6156  photo: 4225004
+-- an 11 MB upload (limit 10 MB)
+{"detail":"Image is larger than 10 MB"}   [HTTP 413]
+-- end state: fastapi (oom flag true, restarts 0), ml, postgres, rabbitmq, redis, worker x3 all running

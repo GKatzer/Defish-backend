@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest==9.1.1
+fakeredis==2.39.0
+httpx==0.28.1
+# optional: a real PostgreSQL for tests/test_migrations.py (skipped when not installed)
+pgserver==0.1.4

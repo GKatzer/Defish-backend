@@ -1,0 +1,50 @@
+{
+ "width": 640,
+ "height": 480,
+ "fish": [
+  {
+   "bbox": [
+    376,
+    104,
+    505,
+    165
+   ],
+   "class": "healthy",
+   "class_confidence": 0.93,
+   "uncertain": false
+  },
+  {
+   "bbox": [
+    359,
+    168,
+    480,
+    225
+   ],
+   "class": "fin_rot",
+   "class_confidence": 0.88,
+   "uncertain": false
+  },
+  {
+   "bbox": [
+    459,
+    114,
+    562,
+    171
+   ],
+   "class": "oodiniosis",
+   "class_confidence": 0.62,
+   "uncertain": true
+  },
+  {
+   "bbox": [
+    235,
+    238,
+    361,
+    295
+   ],
+   "class": "healthy",
+   "class_confidence": 0.91,
+   "uncertain": false
+  }
+ ]
+}
